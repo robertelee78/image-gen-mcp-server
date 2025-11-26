@@ -1,8 +1,51 @@
-# Image Gen MCP Server
+# Image Gen MCP Server (Enhanced Fork)
 
 A production-ready Model Context Protocol (MCP) server for multi-provider image generation with intelligent provider selection, enterprise-grade security, and comprehensive testing.
 
-**Package**: `@merlinrabens/image-gen-mcp-server`
+**Original Package**: `@merlinrabens/image-gen-mcp-server`
+**This Fork**: Enhanced with MCP best practices compliance, bug fixes, and provider optimizations
+
+## 🆕 Enhancements in This Fork
+
+This fork includes several critical improvements and optimizations:
+
+### ✅ MCP Best Practices Compliance
+- **Tool naming**: Migrated from dot notation to MCP-standard snake_case (`image.generate` → `image_generate`)
+- **Comprehensive descriptions**: Enhanced tool documentation with examples, use cases, and error handling guidance
+- **Tool annotations**: Added proper hints (`readOnlyHint`, `openWorldHint`, `idempotentHint`) for LLM optimization
+- **Response formats**: Dual JSON/Markdown output support via `response_format` parameter
+- **Enhanced schemas**: Zod validation with `.strict()` enforcement and detailed examples
+- **Actionable errors**: Error messages now include specific resolution steps and API key signup links
+
+See [docs/MCP_IMPROVEMENTS.md](docs/MCP_IMPROVEMENTS.md) for complete details.
+
+### 🐛 Critical Bug Fixes
+- **Image editing session crash fix**: Resolved session-breaking bug where `image_edit` would crash Claude sessions by returning 5-10MB base64 images
+- **File-based responses**: Both `image_generate` and `image_edit` now save to disk for consistency and reliability
+- **Quality preservation**: No compression needed - original quality maintained
+
+See [docs/EDITING-FIX-SUMMARY.md](docs/EDITING-FIX-SUMMARY.md) for technical details.
+
+### 🚀 Provider Optimizations
+- **Recraft V3**: Added #1 globally-ranked provider with unique vector/SVG generation and perfect text rendering
+- **Ideogram V3**: Upgraded from V2 to V3 with enhanced photorealism and industry-leading text capabilities
+- **Smart routing**: Optimized fallback chain prioritizing quality and cost-effectiveness
+- **Intelligent selection**: Enhanced keyword-based auto-selection for optimal provider matching
+
+See [docs/PROVIDER_OPTIMIZATION_REPORT.md](docs/PROVIDER_OPTIMIZATION_REPORT.md) for research and analysis.
+
+### 📁 Documentation Organization
+All enhancement documentation organized in `/docs/`:
+- `MCP_IMPROVEMENTS.md` - MCP best practices implementation details
+- `EDITING-FIX-SUMMARY.md` - Session-breaking bug fix documentation
+- `PROVIDER_OPTIMIZATION_REPORT.md` - Provider research and optimization analysis
+- `MANUAL_SETUP.md` - Setup guide for new providers
+- `SHOWCASE.md` - Provider comparison and examples
+- `CLAUDE.md` - Claude Code integration configuration
+
+---
+
+## Original Documentation
 
 ## Features
 
