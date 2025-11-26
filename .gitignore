@@ -33,6 +33,10 @@ coverage/
 # MCP generated images (default directory)
 .image-gen-mcp/
 
+
+# Removed Windows wrapper files per user request
+hive-mind-prompt-*.txt
+
 # Claude Flow generated files
 .claude/settings.local.json
 .mcp.json
@@ -57,6 +61,5 @@ coordination/orchestration/*
 *.sqlite-journal
 *.sqlite-wal
 claude-flow
-CLAUDE.md
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
