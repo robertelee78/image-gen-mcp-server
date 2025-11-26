@@ -37,7 +37,8 @@ coverage/
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
 
-# Claude Flow generated files
+# Claude Code configuration
+CLAUDE.md
 .claude/
 .mcp.json
 claude-flow.config.json
