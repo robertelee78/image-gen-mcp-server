@@ -1,0 +1,45 @@
+{
+  "name": "@merlinrabens/image-gen-mcp-server",
+  "version": "1.5.0",
+  "description": "MCP server for image generation with multiple provider support",
+  "main": "dist/index.js",
+  "bin": {
+    "image-gen-mcp-server": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage",
+    "validate-providers": "tsx scripts/validate-providers.ts",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "image-generation",
+    "openai",
+    "stability",
+    "replicate",
+    "gemini"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "dotenv": "^16.6.1",
+    "sharp": "^0.34.4",
+    "undici": "^7.2.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
