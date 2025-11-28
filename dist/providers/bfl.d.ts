@@ -21,6 +21,11 @@ export declare class BFLProvider extends ImageProvider {
     generate(input: GenerateInput): Promise<ProviderResult>;
     edit(input: EditInput): Promise<ProviderResult>;
     /**
+     * Normalize model name to handle various input formats
+     * Maps user-friendly names to internal model identifiers
+     */
+    private normalizeModelName;
+    /**
      * Select the best model based on the request
      */
     private selectBestModel;

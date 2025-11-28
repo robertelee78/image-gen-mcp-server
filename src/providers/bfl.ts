@@ -30,10 +30,14 @@ export class BFLProvider extends ImageProvider {
   getCapabilities() {
     return {
       supportsGenerate: true,
-      supportsEdit: true, // Via Flux Fill
+      supportsEdit: true, // Via Flux Fill and Flux 2
       maxWidth: 2048,
       maxHeight: 2048,
       supportedModels: [
+        // Flux 2 models (latest generation)
+        'flux2-pro', // FLUX.2 [pro] - Highest quality, multi-reference editing - $0.05
+        'flux2-flex', // FLUX.2 [flex] - Adjustable steps/guidance for speed/quality tradeoff
+        // Flux 1.1 models (previous generation)
         'flux1.1-pro', // Standard pro model - $0.04
         'flux1.1-pro-ultra', // Ultra high-res (4MP) - $0.06
         'flux-kontext-pro', // Create and edit with text+images - $0.04
@@ -44,7 +48,9 @@ export class BFLProvider extends ImageProvider {
         'ultra_high_resolution',
         'raw_photography',
         'inpainting',
-        'aspect_ratio_control'
+        'aspect_ratio_control',
+        'multi_reference_editing', // Flux 2 feature
+        'image_to_image' // Flux 2 feature
       ]
     };
   }
@@ -67,8 +73,8 @@ export class BFLProvider extends ImageProvider {
     const cached = this.getCachedResult(cacheKey);
     if (cached) return cached;
 
-    // Select appropriate model based on request
-    const model = input.model || this.selectBestModel(input.prompt, input.width, input.height);
+    // Select appropriate model based on request, normalizing any provided model name
+    const model = this.normalizeModelName(input.model) || this.selectBestModel(input.prompt, input.width, input.height);
 
     logger.info(`BFL generating image`, { model, prompt: input.prompt.slice(0, 50) });
 
@@ -78,20 +84,35 @@ export class BFLProvider extends ImageProvider {
 
       try {
 
-      // Build request body
+      // Build request body based on model type
       const requestBody: Record<string, any> = {
         prompt: input.prompt,
         width: input.width || 1024,
         height: input.height || 1024,
-        // BFL uses steps for quality control
-        steps: model.includes('ultra') ? 50 : 28,
-        // Guidance scale for prompt adherence
-        guidance: 3.5,
-        // Safety tolerance
+        // Safety tolerance (0-5, default 2)
         safety_tolerance: 2,
         // Output format
         output_format: 'png'
       };
+
+      // Model-specific parameters
+      if (model === 'flux2-pro') {
+        // Flux 2 Pro: No steps/guidance params - handles them automatically
+        // Supports multi-reference editing via input_image params
+      } else if (model === 'flux2-flex') {
+        // Flux 2 Flex: Exposes steps (1-50) and guidance (1.5-10) for tuning
+        requestBody.steps = input.steps || 50; // Default 50 for quality
+        requestBody.guidance = input.guidance || 5; // Default 5, range 1.5-10
+        requestBody.prompt_upsampling = true; // Enable prompt enhancement
+      } else if (model.includes('ultra')) {
+        // Flux 1.1 Pro Ultra: Higher steps for 4MP output
+        requestBody.steps = 50;
+        requestBody.guidance = 3.5;
+      } else {
+        // Flux 1.1 Pro and other models
+        requestBody.steps = input.steps || 28;
+        requestBody.guidance = input.guidance || 3.5;
+      }
 
       // Add seed if specified
       if (input.seed) {
@@ -100,9 +121,11 @@ export class BFLProvider extends ImageProvider {
 
       // Determine endpoint based on model
       const endpoint = this.getEndpointForModel(model);
+      // Use api.bfl.ai for Flux 2 models, api.bfl.ml for Flux 1.x
+      const baseUrl = model.startsWith('flux2') ? 'https://api.bfl.ai' : 'https://api.bfl.ml';
 
       const { statusCode, body } = await request(
-        `https://api.bfl.ml/${endpoint}`,
+        `${baseUrl}/${endpoint}`,
         {
           method: 'POST',
           headers: {
@@ -124,8 +147,8 @@ export class BFLProvider extends ImageProvider {
 
       // Handle async generation (BFL returns a task ID for polling)
       if (response.id && !response.sample) {
-        // Poll for result
-        const polledResponse = await this.pollForResult(response.id, controller, apiKey!);
+        // Poll for result using the same base URL
+        const polledResponse = await this.pollForResult(response.id, controller, apiKey!, baseUrl);
         const result = await this.processResult(polledResponse, model);
         this.cacheResult(cacheKey, result);
         return result;
@@ -164,13 +187,23 @@ export class BFLProvider extends ImageProvider {
     // Check rate limit
     await this.checkRateLimit();
 
-    // Choose model based on whether we have a mask
-    // Flux Kontext: General editing without mask
+    // Choose model based on input and whether we have a mask
+    // Flux 2 Pro: Best quality multi-reference editing (default for edits)
+    // Flux Kontext: General editing without mask (Flux 1.x)
     // Flux Fill: Inpainting with mask
-    const model = input.maskImage ? 'flux-fill-pro' : 'flux-kontext-pro';
-    const isKontext = !input.maskImage;
+    let model: string;
+    if (input.model?.startsWith('flux2')) {
+      model = input.model;
+    } else if (input.maskImage) {
+      model = 'flux-fill-pro';
+    } else {
+      // Default to Flux 2 Pro for editing (best quality)
+      model = 'flux2-pro';
+    }
+    const isFlux2 = model.startsWith('flux2');
+    const isKontext = model === 'flux-kontext-pro';
 
-    logger.info(`BFL editing image with ${isKontext ? 'Flux Kontext' : 'Flux Fill'}`, { prompt: input.prompt.slice(0, 50) });
+    logger.info(`BFL editing image with ${model}`, { prompt: input.prompt.slice(0, 50) });
 
     // Execute with retry logic
     return this.executeWithRetry(async () => {
@@ -190,12 +223,34 @@ export class BFLProvider extends ImageProvider {
         }
 
         let endpoint: string;
+        let baseUrl: string;
         let requestBody: Record<string, any>;
 
-        if (isKontext) {
+        if (isFlux2) {
+          // Flux 2 Pro/Flex: Multi-reference editing via input_image params
+          baseUrl = 'https://api.bfl.ai';
+          endpoint = `${baseUrl}/${this.getEndpointForModel(model)}`;
+
+          requestBody = {
+            prompt: input.prompt,
+            input_image: baseImageData.buffer.toString('base64'),
+            width: width || 1024,
+            height: height || 1024,
+            safety_tolerance: 2,
+            output_format: 'png'
+          };
+
+          // Add Flux 2 Flex specific params
+          if (model === 'flux2-flex') {
+            requestBody.steps = 50;
+            requestBody.guidance = 5;
+            requestBody.prompt_upsampling = true;
+          }
+        } else if (isKontext) {
           // Flux Kontext: Uses aspect_ratio instead of width/height
           // All outputs are ~1MP total (e.g., 1024x1024, 1365x768 for 16:9, etc.)
-          endpoint = 'https://api.bfl.ml/v1/flux-kontext-pro';
+          baseUrl = 'https://api.bfl.ml';
+          endpoint = `${baseUrl}/v1/flux-kontext-pro`;
 
           // Calculate aspect ratio from dimensions
           const aspectRatio = this.calculateAspectRatio(width, height);
@@ -211,7 +266,8 @@ export class BFLProvider extends ImageProvider {
           };
         } else {
           // Flux Fill: Inpainting with mask - uses width/height
-          endpoint = 'https://api.bfl.ml/v1/flux-pro-1.0-fill';
+          baseUrl = 'https://api.bfl.ml';
+          endpoint = `${baseUrl}/v1/flux-pro-1.0-fill`;
           requestBody = {
             prompt: input.prompt,
             image: baseImageData.buffer.toString('base64'),
@@ -250,11 +306,11 @@ export class BFLProvider extends ImageProvider {
 
       // Handle async result
       if (response.id && !response.sample) {
-        const polledResponse = await this.pollForResult(response.id, controller, apiKey!);
+        const polledResponse = await this.pollForResult(response.id, controller, apiKey!, baseUrl);
         return await this.processResult(polledResponse, model);
       }
 
-        return await this.processResult(response, model);
+      return await this.processResult(response, model);
       } catch (error) {
         if (error instanceof ProviderError) throw error;
 
@@ -269,11 +325,83 @@ export class BFLProvider extends ImageProvider {
   }
 
   /**
+   * Normalize model name to handle various input formats
+   * Maps user-friendly names to internal model identifiers
+   */
+  private normalizeModelName(model?: string): string | undefined {
+    if (!model) return undefined;
+
+    const lower = model.toLowerCase().replace(/[\s_-]+/g, '');
+
+    // Flux 2 Pro variations
+    if (lower.includes('flux2pro') || lower.includes('flux2.0pro') ||
+        lower === 'flux2' || lower === 'fluxpro2' || lower === 'flux.2pro' ||
+        lower === 'flux2[pro]' || lower === 'flux.2[pro]') {
+      return 'flux2-pro';
+    }
+
+    // Flux 2 Flex variations
+    if (lower.includes('flux2flex') || lower.includes('flux2.0flex') ||
+        lower === 'flux2[flex]' || lower === 'flux.2[flex]' || lower === 'fluxflex2') {
+      return 'flux2-flex';
+    }
+
+    // Flux 1.1 Pro variations - BUT we want to upgrade these to Flux 2!
+    // If someone asks for old flux 1.1, give them flux 2 instead (better quality)
+    if (lower === 'flux1.1pro' || lower === 'fluxpro1.1' || lower === 'flux11pro' ||
+        lower === 'fluxpro11' || lower === 'flux1.1' || lower === 'fluxpro1.1' ||
+        lower.includes('fluxpro1') || lower.includes('flux1pro') ||
+        model === 'flux-pro-1.1') {
+      logger.info(`Upgrading legacy model "${model}" to flux2-pro`);
+      return 'flux2-pro';  // Upgrade to Flux 2!
+    }
+
+    // Flux 1.1 Pro Ultra - upgrade to Flux 2 Pro (better quality, no ultra variant in Flux 2 yet)
+    if (lower.includes('ultra') || lower.includes('flux1.1proultra')) {
+      logger.info(`Upgrading ultra model "${model}" to flux2-pro (Flux 2 has no ultra variant)`);
+      return 'flux2-pro';
+    }
+
+    // Flux Kontext
+    if (lower.includes('kontext')) {
+      return 'flux-kontext-pro';
+    }
+
+    // Flux Fill
+    if (lower.includes('fill') || lower.includes('inpaint')) {
+      return 'flux-fill-pro';
+    }
+
+    // If it's already a valid model name, return it
+    const validModels = ['flux2-pro', 'flux2-flex', 'flux1.1-pro', 'flux1.1-pro-ultra', 'flux-kontext-pro', 'flux-fill-pro'];
+    if (validModels.includes(model)) {
+      return model;
+    }
+
+    // Unknown model - return undefined to trigger auto-selection
+    logger.warn(`Unknown BFL model "${model}", falling back to auto-selection`);
+    return undefined;
+  }
+
+  /**
    * Select the best model based on the request
    */
   private selectBestModel(prompt: string, width?: number, height?: number): string {
     const requestedSize = (width || 1024) * (height || 1024);
     const lowerPrompt = prompt.toLowerCase();
+
+    // Use Flux 2 Pro for highest quality requests
+    if (lowerPrompt.includes('highest quality') || lowerPrompt.includes('best quality') ||
+        lowerPrompt.includes('premium') || lowerPrompt.includes('professional') ||
+        lowerPrompt.includes('flux 2') || lowerPrompt.includes('flux2')) {
+      return 'flux2-pro';
+    }
+
+    // Use Flux 2 Flex for speed/quality tradeoff requests or drafts
+    if (lowerPrompt.includes('draft') || lowerPrompt.includes('quick') ||
+        lowerPrompt.includes('fast') || lowerPrompt.includes('flex')) {
+      return 'flux2-flex';
+    }
 
     // Use ultra for high-resolution requests (>1MP)
     if (requestedSize > 1024 * 1024) {
@@ -286,8 +414,8 @@ export class BFLProvider extends ImageProvider {
       return 'flux-kontext-pro';
     }
 
-    // Default to standard pro model - fast and reliable
-    return 'flux1.1-pro';
+    // Default to Flux 2 Pro - latest and highest quality
+    return 'flux2-pro';
   }
 
   /**
@@ -295,13 +423,17 @@ export class BFLProvider extends ImageProvider {
    */
   private getEndpointForModel(model: string): string {
     const endpoints: Record<string, string> = {
+      // Flux 2 models (latest generation)
+      'flux2-pro': 'v1/flux-2-pro',
+      'flux2-flex': 'v1/flux-2-flex',
+      // Flux 1.1 models (previous generation)
       'flux1.1-pro': 'v1/flux-pro-1.1',
       'flux1.1-pro-ultra': 'v1/flux-pro-1.1-ultra',
       'flux-kontext-pro': 'v1/flux-kontext-pro',
       'flux-fill-pro': 'v1/flux-fill'
     };
 
-    return endpoints[model] || 'v1/flux-pro-1.1';
+    return endpoints[model] || 'v1/flux-2-pro'; // Default to Flux 2 Pro (latest)
   }
 
   /**
@@ -344,7 +476,7 @@ export class BFLProvider extends ImageProvider {
   /**
    * Poll for async result with exponential backoff
    */
-  private async pollForResult(taskId: string, controller: AbortController, apiKey: string): Promise<BFLGenerateResponse> {
+  private async pollForResult(taskId: string, controller: AbortController, apiKey: string, baseUrl: string = 'https://api.bfl.ml'): Promise<BFLGenerateResponse> {
     const maxAttempts = 30;
     const initialDelay = 1000; // 1 second
     const maxDelay = 10000; // 10 seconds
@@ -354,9 +486,9 @@ export class BFLProvider extends ImageProvider {
       const delay = Math.min(initialDelay * Math.pow(1.5, i), maxDelay) + Math.random() * 500;
       await new Promise(resolve => setTimeout(resolve, delay));
 
-      // Use the correct API domain (.ml not .ai)
+      // Use the same base URL as the generation request
       const { statusCode, body } = await request(
-        `https://api.bfl.ml/v1/get_result?id=${taskId}`,
+        `${baseUrl}/v1/get_result?id=${taskId}`,
         {
           method: 'GET',
           headers: {
